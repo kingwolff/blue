@@ -23,6 +23,35 @@ class Database:
             logger.error(f"Database connection failed: {str(e)}")
             raise
 
+    def check_subscription_exists(self, telegram_id: int, username: str) -> bool:
+        """
+        Check if a subscription already exists
+        Args:
+            telegram_id (int): Telegram user ID
+            username (str): Extracted username from subscription link
+        Returns:
+            bool: True if subscription exists, False otherwise
+        """
+        try:
+            if not self.connection or not self.connection.is_connected():
+                self.connect()
+
+            cursor = self.connection.cursor()
+            query = """
+            SELECT COUNT(*) 
+            FROM users 
+            WHERE telegram_id = %s AND username = %s
+            """
+            cursor.execute(query, (telegram_id, username))
+            result = cursor.fetchone()
+            return result[0] > 0
+        except Exception as e:
+            logger.error(f"Error checking subscription: {str(e)}")
+            return False
+        finally:
+            if cursor:
+                cursor.close()
+
     def save_user(self, username: str, telegram_id: int, telegram_username: str, telegram_name: str):
         """
         Save user information to database
@@ -31,40 +60,39 @@ class Database:
             telegram_id (int): Telegram user ID
             telegram_username (str): Telegram username
             telegram_name (str): Telegram display name
+        Returns:
+            bool: True if saved successfully, False if already exists
         """
         try:
             if not self.connection or not self.connection.is_connected():
                 self.connect()
 
+            # Check if subscription already exists
+            if self.check_subscription_exists(telegram_id, username):
+                logger.info(f"Subscription already exists for telegram_id: {telegram_id}, username: {username}")
+                return False
+
             cursor = self.connection.cursor()
-            
             query = """
             INSERT INTO users 
             (username, telegram_id, telegram_username, telegram_name, start_bot, last_message) 
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-            telegram_username = %s,
-            telegram_name = %s,
-            last_message = %s
             """
             
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
             values = (
                 username,
                 telegram_id,
                 telegram_username,
                 telegram_name,
                 current_time,
-                current_time,
-                telegram_username,
-                telegram_name,
                 current_time
             )
             
             cursor.execute(query, values)
             self.connection.commit()
             logger.info(f"User data saved successfully for telegram_id: {telegram_id}")
+            return True
             
         except Exception as e:
             logger.error(f"Failed to save user data: {str(e)}")
